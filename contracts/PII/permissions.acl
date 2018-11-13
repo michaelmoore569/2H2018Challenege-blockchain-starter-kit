@@ -13,43 +13,39 @@
  */
 
 /**
- * Access control rules. These rules allow anyone to submit AuthorizeAccess
- * and RevokeAccess transaction as well as granting full access to a member's
- * own record. A member can access another member's details if the member has
- * added them to their authorized list.
+ * Access Control List for the auction network.
  */
-
-rule AuthorizeAccessTransaction {
-    description: "Allow all participants to submit AuthorizeAccess transactions"
-    participant: "ANY"
-    operation: CREATE
-    resource: "org.acme.pii.AuthorizeAccess"
-    action: ALLOW
-}
-
-rule RevokeAccessTransaction {
-    description: "Allow all participants to submit RevokeAccess transactions"
-    participant: "ANY"
-    operation: CREATE
-    resource: "org.acme.pii.RevokeAccess"
-    action: ALLOW
-}
-
-rule OwnRecordFullAccess {
-    description: "Allow all participants full access to their own record"
-    participant(p): "org.acme.pii.Member"
+rule Auctioneer {
+    description: "Allow the auctioneer full access"
+    participant: "org.acme.vehicle.auction.Auctioneer"
     operation: ALL
-    resource(r): "org.acme.pii.Member"
-    condition: (r.getIdentifier() === p.getIdentifier())
+    resource: "org.acme.vehicle.auction.*"
     action: ALLOW
 }
 
-rule ForeignRecordConditionalAccess {
-    description: "Allow participants access to other people's records if granted"
-    participant(p): "org.acme.pii.Member"
+rule Member {
+    description: "Allow the member read access"
+    participant: "org.acme.vehicle.auction.Member"
+    operation: READ
+    resource: "org.acme.vehicle.auction.*"
+    action: ALLOW
+}
+
+rule VehicleOwner {
+    description: "Allow the owner of a vehicle total access"
+    participant(m): "org.acme.vehicle.auction.Member"
     operation: ALL
-    resource(r): "org.acme.pii.Member"
-    condition: (r.authorized && r.authorized.indexOf(p.getIdentifier()) > -1)
+    resource(v): "org.acme.vehicle.auction.Vehicle"
+    condition: (v.owner.getIdentifier() == m.getIdentifier())
+    action: ALLOW
+}
+
+rule VehicleListingOwner {
+    description: "Allow the owner of a vehicle total access to their vehicle listing"
+    participant(m): "org.acme.vehicle.auction.Member"
+    operation: ALL
+    resource(v): "org.acme.vehicle.auction.VehicleListing"
+    condition: (v.vehicle.owner.getIdentifier() == m.getIdentifier())
     action: ALLOW
 }
 

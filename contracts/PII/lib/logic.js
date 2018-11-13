@@ -12,75 +12,83 @@
  * limitations under the License.
  */
 
-'use strict';
-
-/* global getCurrentParticipant getParticipantRegistry getFactory emit */
+/* global getAssetRegistry getParticipantRegistry */
 
 /**
- * A Member grants access to their record to another Member.
- * @param {org.acme.pii.AuthorizeAccess} authorize - the authorize to be processed
+ * Close the bidding for a vehicle listing and choose the
+ * highest bid that is over the asking price
+ * @param {org.acme.vehicle.auction.CloseBidding} closeBidding - the closeBidding transaction
  * @transaction
  */
-async function authorizeAccess(authorize) {  // eslint-disable-line no-unused-vars
-
-    const me = getCurrentParticipant();
-    console.log('**** AUTH: ' + me.getIdentifier() + ' granting access to ' + authorize.memberId );
-
-    if(!me) {
-        throw new Error('A participant/certificate mapping does not exist.');
+async function closeBidding(closeBidding) {  // eslint-disable-line no-unused-vars
+    const listing = closeBidding.listing;
+    if (listing.state !== 'FOR_SALE') {
+        throw new Error('Listing is not FOR SALE');
+    }
+    // by default we mark the listing as RESERVE_NOT_MET
+    listing.state = 'RESERVE_NOT_MET';
+    let highestOffer = null;
+    let buyer = null;
+    let seller = null;
+    if (listing.offers && listing.offers.length > 0) {
+        // sort the bids by bidPrice
+        listing.offers.sort(function(a, b) {
+            return (b.bidPrice - a.bidPrice);
+        });
+        highestOffer = listing.offers[0];
+        if (highestOffer.bidPrice >= listing.reservePrice) {
+            // mark the listing as SOLD
+            listing.state = 'SOLD';
+            buyer = highestOffer.member;
+            seller = listing.vehicle.owner;
+            // update the balance of the seller
+            console.log('#### seller balance before: ' + seller.balance);
+            seller.balance += highestOffer.bidPrice;
+            console.log('#### seller balance after: ' + seller.balance);
+            // update the balance of the buyer
+            console.log('#### buyer balance before: ' + buyer.balance);
+            buyer.balance -= highestOffer.bidPrice;
+            console.log('#### buyer balance after: ' + buyer.balance);
+            // transfer the vehicle to the buyer
+            listing.vehicle.owner = buyer;
+            // clear the offers
+            listing.offers = null;
+        }
     }
 
-    // if the member is not already authorized, we authorize them
-    let index = -1;
-
-    if(!me.authorized) {
-        me.authorized = [];
-    }
-    else {
-        index = me.authorized.indexOf(authorize.memberId);
+    if (highestOffer) {
+        // save the vehicle
+        const vehicleRegistry = await getAssetRegistry('org.acme.vehicle.auction.Vehicle');
+        await vehicleRegistry.update(listing.vehicle);
     }
 
-    if(index < 0) {
-        me.authorized.push(authorize.memberId);
+    // save the vehicle listing
+    const vehicleListingRegistry = await getAssetRegistry('org.acme.vehicle.auction.VehicleListing');
+    await vehicleListingRegistry.update(listing);
 
-        // emit an event
-        const event = getFactory().newEvent('org.acme.pii', 'MemberEvent');
-        event.memberTransaction = authorize;
-        emit(event);
-
-        // persist the state of the member
-        const memberRegistry = await getParticipantRegistry('org.acme.pii.Member');
-        await memberRegistry.update(me);
+    if (listing.state === 'SOLD') {
+        // save the buyer
+        const userRegistry = await getParticipantRegistry('org.acme.vehicle.auction.Member');
+        await userRegistry.updateAll([buyer, seller]);
     }
 }
 
 /**
- * A Member revokes access to their record from another Member.
- * @param {org.acme.pii.RevokeAccess} revoke - the RevokeAccess to be processed
+ * Make an Offer for a VehicleListing
+ * @param {org.acme.vehicle.auction.Offer} offer - the offer
  * @transaction
  */
-async function revokeAccess(revoke) {  // eslint-disable-line no-unused-vars
-
-    const me = getCurrentParticipant();
-    console.log('**** REVOKE: ' + me.getIdentifier() + ' revoking access to ' + revoke.memberId );
-
-    if(!me) {
-        throw new Error('A participant/certificate mapping does not exist.');
+async function makeOffer(offer) {  // eslint-disable-line no-unused-vars
+    let listing = offer.listing;
+    if (listing.state !== 'FOR_SALE') {
+        throw new Error('Listing is not FOR SALE');
     }
-
-    // if the member is authorized, we remove them
-    const index = me.authorized ? me.authorized.indexOf(revoke.memberId) : -1;
-
-    if(index>-1) {
-        me.authorized.splice(index, 1);
-
-        // emit an event
-        const event = getFactory().newEvent('org.acme.pii', 'MemberEvent');
-        event.memberTransaction = revoke;
-        emit(event);
-
-        // persist the state of the member
-        const memberRegistry = await getParticipantRegistry('org.acme.pii.Member');
-        await memberRegistry.update(me);
+    if (!listing.offers) {
+        listing.offers = [];
     }
+    listing.offers.push(offer);
+
+    // save the vehicle listing
+    const vehicleListingRegistry = await getAssetRegistry('org.acme.vehicle.auction.VehicleListing');
+    await vehicleListingRegistry.update(listing);
 }
